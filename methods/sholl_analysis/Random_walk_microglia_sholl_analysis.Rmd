@@ -1,0 +1,469 @@
+---
+title: "Random_walk_microglia_pipline"
+output: html_document
+date: "2026-03-01"
+---
+
+```{r}
+# =========================
+# 0) Global options
+# =========================
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+```{r}
+# =========================
+# 1) Libraries
+# =========================
+library(MGtoolbox)
+library(ggplot2)
+```
+
+```{r}
+# =========================
+# 2) Load example stack (replace with your new data path for validation)
+# =========================
+stack_dir <- system.file("extdata", package = "MGtoolbox")
+denoised_stack <- read_z_stacks(dir = stack_dir, filename = "denoised_stack.tif")
+
+so <- stackObj(
+  denoised_stack$denoised_stack.tif,
+  bio_dim = c(210.42, 210.42, 48),
+  output_path = system.file("extdata", package = "MGtoolbox"),
+  stack_alias = "denoised_zstack"
+)
+
+create_stackDir(so)
+plot(so)
+```
+```{r}
+# =========================
+# 3) Soma detection + territory -> prob stack
+# =========================
+so <- detect_somas(
+  stackObj = so,
+  prior_soma_diameter = 12,
+  min_soma_volume = 300,
+  import_MDR = TRUE
+)
+
+head(soma_centroids(so))
+head(soma_clusters(so))
+
+signal_stack(so) <- stack(so)
+so <- detected_territory(so, mu = 60, sigma = 3)
+
+ds <- so@detected_signal_stack
+summary(c(ds))
+```
+
+```{r}
+# =========================
+# 4) Choose a z-slice + extract prob2d
+# =========================
+prob_3d <- so@detected_signal_stack
+raw3d   <- stack(so)
+```
+
+```{r}
+z <- 20                 # <-- change if needed
+prob2d <- prob_3d[,,z]
+raw2d  <- raw3d[,,z]
+
+# quick views
+plotIM(MIProject_im(ds, along = 3))
+plotIM(ds[,,z])
+plotIM(raw2d)
+```
+```{r}
+# =========================
+# 5) FIXED soma coordinate + optional ROI check
+# =========================
+x0 <- 220
+y0 <- 360
+
+# Optional ROI for visualization only
+x1 <- 0; x2 <- 400
+y1 <- 1;   y2 <- 700
+prob2d_roi <- prob2d[y1:y2, x1:x2]
+
+x_roi <- x0 - x1 + 1
+y_roi <- y0 - y1 + 1
+
+plotIM(t(prob2d_roi)[, nrow(prob2d_roi):1])
+points(x_roi, nrow(prob2d_roi) - y_roi + 1, pch = 4, col="red", cex=1.5, lwd=2)
+
+cat("prob2d dim:", dim(prob2d), "\n")
+```
+#Block A. Core RW + helpers（Sholl BLUE only）
+
+```{r}
+# =========================
+# Block A1: BLUE RW core
+# =========================
+rw_path_2d_multi_to_center <- function(prob2d, x_start, y_start, x0, y0,
+                                       n_steps = 5000,
+                                       alpha = 12.0,
+                                       step_size = 5,
+                                       n_cand = 200,
+                                       radius = 200,
+                                       eps = 1e-6) {
+  H <- nrow(prob2d); W <- ncol(prob2d)
+  r2 <- radius^2
+
+  x <- integer(n_steps + 1); y <- integer(n_steps + 1)
+  x[1] <- x_start; y[1] <- y_start
+
+  for (t in 1:n_steps) {
+    s <- as.integer(step_size)
+    if (!is.finite(s) || is.na(s) || s < 1) s <- 1L
+
+    dx <- sample.int(2*s + 1, n_cand, replace = TRUE) - (s + 1)
+    dy <- sample.int(2*s + 1, n_cand, replace = TRUE) - (s + 1)
+    keep0 <- !(dx == 0 & dy == 0)
+    dx <- dx[keep0]; dy <- dy[keep0]
+
+    xx <- x[t] + dx
+    yy <- y[t] + dy
+
+    keep <- (xx >= 1 & xx <= W & yy >= 1 & yy <= H)
+    keep <- keep & ((xx - x0)^2 + (yy - y0)^2 <= r2)
+
+    d_cur2 <- (x[t] - x0)^2 + (y[t] - y0)^2
+    d_new2 <- (xx - x0)^2 + (yy - y0)^2
+    keep <- keep & (d_new2 <= d_cur2 + 3)
+
+    xx <- xx[keep]; yy <- yy[keep]
+    if (length(xx) == 0) {
+      x <- x[1:t]; y <- y[1:t]
+      return(data.frame(step = 0:(t-1), x = x, y = y))
+    }
+
+    w <- (pmax(prob2d[cbind(yy, xx)], 0) + eps)^alpha
+    if (!all(is.finite(w)) || sum(w) <= 0) w <- rep(1, length(w))
+    p <- w / sum(w)
+
+    k <- sample.int(length(xx), 1, prob = p)
+    x[t + 1] <- xx[k]
+    y[t + 1] <- yy[k]
+
+    if ((x[t + 1] - x0)^2 + (y[t + 1] - y0)^2 <= 2^2) {
+      x <- x[1:(t+1)]; y <- y[1:(t+1)]
+      return(data.frame(step = 0:t, x = x, y = y))
+    }
+  }
+
+  data.frame(step = 0:n_steps, x = x, y = y)
+}
+
+# =========================
+# Block A2: boundary candidates
+# =========================
+get_boundary_points <- function(prob2d, x0, y0, radius = 200, n_theta = 1440) {
+  H <- nrow(prob2d); W <- ncol(prob2d)
+  theta <- seq(0, 2*pi, length.out = n_theta)
+  xs <- round(x0 + radius * cos(theta))
+  ys <- round(y0 + radius * sin(theta))
+  keep <- (xs >= 1 & xs <= W & ys >= 1 & ys <= H)
+  xs <- xs[keep]; ys <- ys[keep]
+  vals <- prob2d[cbind(ys, xs)]
+  vals[!is.finite(vals)] <- 0
+  unique(data.frame(x = xs, y = ys, val = vals))
+}
+
+# =========================
+# Block A3: run one BLUE round (radius) + optional drop + archive
+# =========================
+run_blue_round <- function(prob2d, x0, y0, radius,
+                           n_theta_boundary,
+                           K_boundary, min_sep_boundary,
+                           n_steps_rw, alpha_rw, step_rw, n_cand_rw, eps_rw,
+                           drop_ids = integer(0)) {
+
+  H <- nrow(prob2d); W <- ncol(prob2d)
+
+  boundary_df <- get_boundary_points(prob2d, x0, y0, radius = radius, n_theta = n_theta_boundary)
+  boundary_df <- boundary_df[order(-boundary_df$val), ]
+
+  # pick seeds with separation
+  seeds <- data.frame(x=integer(0), y=integer(0), val=numeric(0))
+  for (i in seq_len(nrow(boundary_df))) {
+    cand <- boundary_df[i, ]
+    if (nrow(seeds) == 0) {
+      seeds <- rbind(seeds, cand)
+    } else {
+      d2 <- (seeds$x - cand$x)^2 + (seeds$y - cand$y)^2
+      if (all(d2 >= min_sep_boundary^2)) seeds <- rbind(seeds, cand)
+    }
+    if (nrow(seeds) >= K_boundary) break
+  }
+  seeds <- seeds[, c("x","y","val")]
+
+  # trace
+  paths_back <- vector("list", nrow(seeds))
+  for (i in seq_len(nrow(seeds))) {
+    paths_back[[i]] <- rw_path_2d_multi_to_center(
+      prob2d,
+      x_start = seeds$x[i], y_start = seeds$y[i],
+      x0 = x0, y0 = y0,
+      n_steps = n_steps_rw,
+      alpha = alpha_rw,
+      step_size = step_rw,
+      n_cand = n_cand_rw,
+      radius = radius,
+      eps = eps_rw
+    )
+  }
+
+  # optional drop ids (seed/path index)
+  if (length(drop_ids) > 0) {
+    keep_idx <- setdiff(seq_along(paths_back), drop_ids)
+    paths_back <- paths_back[keep_idx]
+    seeds <- seeds[keep_idx, , drop = FALSE]
+  }
+
+  list(
+    radius_lim = radius,
+    x0=x0, y0=y0,
+    H=H, W=W,
+    seeds = seeds,
+    paths_back = paths_back
+  )
+}
+
+# =========================
+# Block A4: plotting helpers
+# =========================
+plot_blue_only <- function(prob2d, blue_obj, main = NULL) {
+  H <- blue_obj$H
+  x0 <- blue_obj$x0; y0 <- blue_obj$y0
+  r  <- blue_obj$radius_lim
+
+  plotIM(t(prob2d)[, H:1])
+
+  theta <- seq(0, 2*pi, length.out = 400)
+  lines(x0 + r*cos(theta),
+        (H - y0 + 1) + r*sin(theta),
+        col = "cyan", lwd = 2)
+
+  for (pth in blue_obj$paths_back) {
+    if (is.null(pth) || nrow(pth) == 0) next
+    lines(pth$x, H - pth$y + 1, col = "blue", lwd = 3)
+  }
+
+  points(x0, H - y0 + 1, pch = 4, col = "yellow", lwd = 2, cex = 1.8)
+  points(blue_obj$seeds$x, H - blue_obj$seeds$y + 1, pch = 16, col = "red", cex = 1.1)
+
+  if (!is.null(main)) title(main)
+}
+
+plot_overlay_all_rounds <- function(prob2d, blue_list, outer_circle = NULL, main = "Overlay all rounds") {
+  H <- nrow(prob2d)
+  plotIM(t(prob2d)[, H:1])
+
+  if (is.null(outer_circle)) outer_circle <- max(sapply(blue_list, function(b) b$radius_lim))
+  theta <- seq(0, 2*pi, length.out = 400)
+
+  # outer circle
+  lines(blue_list[[1]]$x0 + outer_circle*cos(theta),
+        (H - blue_list[[1]]$y0 + 1) + outer_circle*sin(theta),
+        col = "cyan", lwd = 2)
+
+  # all paths in red
+  for (b in blue_list) {
+    for (pth in b$paths_back) {
+      if (is.null(pth) || nrow(pth) == 0) next
+      lines(pth$x, H - pth$y + 1, col = "red", lwd = 3)
+    }
+  }
+
+  points(blue_list[[1]]$x0, H - blue_list[[1]]$y0 + 1,
+         pch = 4, col = "yellow", lwd = 2, cex = 1.8)
+  title(main)
+}
+```
+
+#Block B. Parameters（Sholl / multi-round）
+
+```{r}
+# =========================
+# Block B: parameters
+# =========================
+n_theta_boundary <- 1440
+K_boundary <- 5
+min_sep_boundary <- 12
+
+n_steps_rw <- 5000
+alpha_rw   <- 12.0
+step_rw    <- 5
+n_cand_rw  <- 250
+eps_rw     <- 1e-6
+```
+
+```{r}
+# =========================
+# Block C: two radii example
+# =========================
+blue_120 <- run_blue_round(
+  prob2d, x0, y0, radius = 100,
+  n_theta_boundary = n_theta_boundary,
+  K_boundary = K_boundary, min_sep_boundary = min_sep_boundary,
+  n_steps_rw = n_steps_rw, alpha_rw = alpha_rw, step_rw = step_rw, n_cand_rw = n_cand_rw, eps_rw = eps_rw,
+  drop_ids = c(8,10)   # <-- change if needed
+)
+
+blue_70 <- run_blue_round(
+  prob2d, x0, y0, radius = 70,
+  n_theta_boundary = n_theta_boundary,
+  K_boundary = K_boundary, min_sep_boundary = min_sep_boundary,
+  n_steps_rw = n_steps_rw, alpha_rw = alpha_rw, step_rw = step_rw, n_cand_rw = n_cand_rw, eps_rw = eps_rw
+)
+
+op <- par(no.readonly = TRUE); par(mfrow=c(1,2), mar=c(2,2,3,1))
+plot_blue_only(prob2d, blue_120, main = "BLUE traceback (r=120, drop 8&10)")
+plot_blue_only(prob2d, blue_70,  main = "BLUE traceback (r=70)")
+par(op)
+```
+
+
+```{r}
+# =========================
+# Block C2: overlay 120+70 (outer circle only, all paths red)
+# =========================
+plot_overlay_all_rounds(prob2d, list(blue_120, blue_70), outer_circle = 120,
+                        main = "Overlay: BLUE (r=120 drop) + BLUE (r=70)")
+```
+#Block D. AUTO multi-round
+
+```{r}
+# =========================
+# Block D: auto multi-round BLUE
+# =========================
+
+K_boundary <- 8 # set your own boundary 
+
+auto_blue_rounds <- function(prob2d, x0, y0,
+                             radius_max = 120,
+                             shrink = 0.60,
+                             n_round = 5,
+                             n_theta_boundary,
+                             K_boundary, min_sep_boundary,
+                             n_steps_rw, alpha_rw, step_rw, n_cand_rw, eps_rw,
+                             drop_ids_list = NULL) {
+
+  radii <- round(radius_max * shrink^(0:(n_round-1)))
+  radii[radii < 5] <- 5
+
+  if (is.null(drop_ids_list)) {
+    drop_ids_list <- replicate(n_round, integer(0), simplify = FALSE)
+  }
+  stopifnot(length(drop_ids_list) == n_round)
+
+  blue_list <- vector("list", n_round)
+  for (k in seq_len(n_round)) {
+    rk <- radii[k]
+    blue_list[[k]] <- run_blue_round(
+      prob2d, x0, y0, radius = rk,
+      n_theta_boundary = n_theta_boundary,
+      K_boundary = K_boundary, min_sep_boundary = min_sep_boundary,
+      n_steps_rw = n_steps_rw, alpha_rw = alpha_rw, step_rw = step_rw, n_cand_rw = n_cand_rw, eps_rw = eps_rw,
+      drop_ids = drop_ids_list[[k]]
+    )
+    cat(sprintf("[Round %d] radius=%d  #paths=%d  non-empty=%d\n",
+                k, rk,
+                length(blue_list[[k]]$paths_back),
+                sum(sapply(blue_list[[k]]$paths_back, function(p) !is.null(p) && nrow(p)>0))))
+  }
+
+  names(blue_list) <- paste0("blue_r", radii)
+  attr(blue_list, "radii") <- radii
+  blue_list
+}
+
+```
+
+
+
+```{r}
+K_boundary <- 6
+blue_auto <- auto_blue_rounds(
+  prob2d, x0, y0,
+  radius_max = 100,
+  shrink = 0.70,
+  n_round = 10,
+  n_theta_boundary = n_theta_boundary,
+  K_boundary = K_boundary,
+  min_sep_boundary = min_sep_boundary,
+  n_steps_rw = n_steps_rw,
+  alpha_rw = alpha_rw,
+  step_rw = step_rw,
+  n_cand_rw = n_cand_rw,
+  eps_rw = eps_rw
+)
+
+plot_overlay_all_rounds(prob2d, blue_auto, outer_circle = 100,
+                        main = "AUTO multi-round BLUE overlay")
+
+```
+
+#Block E. Support filter
+
+```{r}
+# =========================
+# Block E: support filter by angle
+# =========================
+angle_of_seed <- function(x, y, x0, y0) atan2(y - y0, x - x0)
+
+circ_diff <- function(a, b) {
+  d <- abs(a - b)
+  pmin(d, 2*pi - d)
+}
+
+filter_round1_by_support <- function(blue_auto, support_rounds = c(2,3), angle_tol_deg = 25) {
+  angle_tol <- angle_tol_deg * pi / 180
+
+  b1 <- blue_auto[[1]]
+  th1 <- angle_of_seed(b1$seeds$x, b1$seeds$y, b1$x0, b1$y0)
+
+  support_thetas <- lapply(support_rounds, function(rr) {
+    br <- blue_auto[[rr]]
+    angle_of_seed(br$seeds$x, br$seeds$y, br$x0, br$y0)
+  })
+
+  keep <- rep(TRUE, length(th1))
+  for (i in seq_along(th1)) {
+    ok_all <- TRUE
+    for (th_sup in support_thetas) {
+      detected <- any(circ_diff(th_sup, th1[i]) <= angle_tol)
+      if (!detected) { ok_all <- FALSE; break }
+    }
+    keep[i] <- ok_all
+  }
+
+  blue_auto[[1]]$seeds <- blue_auto[[1]]$seeds[keep, , drop=FALSE]
+  blue_auto[[1]]$paths_back <- blue_auto[[1]]$paths_back[keep]
+
+  cat("Round1: kept =", sum(keep), "/", length(keep), "\n")
+  blue_auto
+}
+
+blue_auto_filt <- filter_round1_by_support(blue_auto, support_rounds = c(2,3), angle_tol_deg = 10)
+
+plot_overlay_all_rounds(prob2d, blue_auto_filt, outer_circle = 100,
+                        main = "Overlay after support filter (Round1 filtered)")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
