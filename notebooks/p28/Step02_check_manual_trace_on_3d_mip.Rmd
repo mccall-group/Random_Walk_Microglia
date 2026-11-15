@@ -1,0 +1,304 @@
+---
+title: "02 - Check manual tracing on 3D MIP"
+author: "Xinyi Chen"
+output: html_document
+---
+
+# Purpose
+
+This file visually checks whether the manual tracing for
+p28_330_HET_009 aligns with the raw image and the MGtoolbox
+preprocessed signal.
+
+It overlays the tracing on maximum-intensity projections (MIPs)
+of both three-dimensional volumes, showing the full image and
+a closer view of the traced region. These plots assess alignment
+in the X-Y plane. A coordinate summary reports the image dimensions
+and the tracing's X, Y, and Z ranges.
+
+# Steps
+
+1. Libraries
+   Load MGtoolbox for image processing and xml2 for reading
+   the manual-tracing file.
+
+2. File paths
+   Specify the project directory, sample name, raw TIFF,
+   MGtoolbox signal file, and manual-tracing file.
+
+3. Create the raw-image MIP
+   Read the raw three-dimensional TIFF stack and calculate
+   its maximum-intensity projection along the axial direction.
+
+4. Create the MG-probability MIP
+   Load the three-dimensional signal saved in Step01 and
+   calculate its maximum-intensity projection.
+
+5. Read the manual tracing
+   Read the compressed XML tracing file and extract the
+   X, Y, and Z coordinates. Keep tracing paths separate
+   so that unrelated endpoints are not connected.
+
+6. Plot helpers
+   Define functions for displaying MIPs and overlaying
+   the tracing paths. Scale image contrast for display
+   using the 1st and 99.8th intensity percentiles.
+   This display adjustment leaves the stored volumes unchanged.
+
+7. Generate the alignment figure
+   Display four panels: the raw-image and MGtoolbox-signal
+   MIPs with tracing overlays, each shown at full view and
+   zoomed around the traced region.
+
+8. Print the coordinate summary
+   Report the sample name, volume dimensions, numbers of
+   tracing paths and points, and coordinate ranges to
+   support the alignment check.
+
+The setup chunk controls R Markdown output formatting and
+is separate from these processing steps.
+
+```{r setup}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+## 1. Libraries
+
+```{r libraries}
+library(MGtoolbox)
+library(xml2)
+```
+
+## 2. File paths
+
+```{r paths}
+find_project_root <- function(start = getwd()) {
+  current <- normalizePath(start, winslash = "/", mustWork = TRUE)
+
+  repeat {
+    has_readme <- file.exists(file.path(current, "README.md"))
+    has_notebooks <- dir.exists(file.path(current, "notebooks"))
+    has_data <- dir.exists(file.path(current, "data"))
+
+    if (has_readme && has_notebooks && has_data) {
+      return(current)
+    }
+
+    parent <- dirname(current)
+    if (identical(parent, current)) {
+      stop("Open this file from within the repository containing README.md, notebooks/, and data/.")
+    }
+    current <- parent
+  }
+}
+
+project_root <- find_project_root()
+sample_name <- "p28_330_HET_009"
+
+raw_dir <- file.path(
+  project_root, "data", sample_name, "raw"
+)
+
+raw_file <- "p28_330_HET_009.tif"
+
+probability_file <- file.path(
+  project_root,
+  "results", sample_name, "01_mgtoolbox_signal",
+  "p28_330_HET_009_mg_probability_3d.rds"
+)
+
+trace_file <- file.path(
+  project_root,
+  "data", sample_name, "manual_tracing",
+  "p28_330_HET_009_manual.traces"
+)
+
+```
+
+## 3. Create the raw-image MIP
+
+```{r raw-mip}
+stack_list <- read_z_stacks(
+  dir = raw_dir,
+  filename = raw_file
+)
+
+image_stack <- stack_list[[raw_file]]
+raw_mip <- MIProject_im(image_stack, along = 3)
+
+dim(image_stack)
+dim(raw_mip)
+```
+
+## 4. Create the MG-probability MIP
+
+```{r probability-mip}
+probability_3d <- readRDS(probability_file)
+probability_mip <- MIProject_im(probability_3d, along = 3)
+
+dim(probability_3d)
+dim(probability_mip)
+```
+
+## 5. Read the manual tracing
+
+The `.traces` file is a gzip-compressed XML file. We keep each path separate
+so that unrelated path endpoints are never connected to one another.
+
+```{r read-tracing}
+trace_xml_text <- paste(
+  readLines(gzfile(trace_file), warn = FALSE),
+  collapse = "\n"
+)
+
+trace_document <- read_xml(trace_xml_text)
+trace_path_nodes <- xml_find_all(trace_document, "//path")
+
+trace_paths <- lapply(seq_along(trace_path_nodes), function(i) {
+  point_nodes <- xml_find_all(trace_path_nodes[[i]], ".//point")
+
+  data.frame(
+    path_id = i,
+    point_id = seq_along(point_nodes),
+    x = as.numeric(xml_attr(point_nodes, "x")),
+    y = as.numeric(xml_attr(point_nodes, "y")),
+    z = as.numeric(xml_attr(point_nodes, "z"))
+  )
+})
+
+trace_points <- do.call(rbind, trace_paths)
+
+cat("Number of tracing paths:", length(trace_paths), "\n")
+cat("Number of tracing points:", nrow(trace_points), "\n")
+cat("X range:", range(trace_points$x), "\n")
+cat("Y range:", range(trace_points$y), "\n")
+cat("Z range:", range(trace_points$z), "\n")
+```
+
+## 6. Plot helpers
+
+```{r plot-helpers}
+plot_mip <- function(mip, title_text, x_limits = NULL, y_limits = NULL) {
+  image_height <- nrow(mip)
+  image_width <- ncol(mip)
+
+  if (is.null(x_limits)) {
+    x_limits <- c(0, image_width - 1)
+  }
+
+  if (is.null(y_limits)) {
+    y_limits <- c(image_height - 1, 0)
+  }
+
+  display_limits <- quantile(
+    as.vector(mip),
+    probs = c(0.01, 0.998),
+    na.rm = TRUE
+  )
+
+  displayed <- (mip - display_limits[1]) /
+    (display_limits[2] - display_limits[1])
+  displayed <- pmin(pmax(displayed, 0), 1)
+
+  # `displayed` is already a 0-1 matrix.  Passing it directly to
+  # as.raster() preserves both the true black-white range and its 2D shape.
+  gray_raster <- as.raster(displayed)
+
+  plot(
+    NA,
+    xlim = x_limits,
+    ylim = y_limits,
+    axes = FALSE,
+    xlab = "",
+    ylab = "",
+    asp = 1,
+    main = title_text
+  )
+
+  rasterImage(
+    gray_raster,
+    xleft = 0,
+    ybottom = image_height - 1,
+    xright = image_width - 1,
+    ytop = 0,
+    interpolate = FALSE
+  )
+}
+
+add_manual_tracing <- function(paths, line_color = "red", line_width = 1) {
+  for (one_path in paths) {
+    if (nrow(one_path) == 1) {
+      points(one_path$x, one_path$y, col = line_color, pch = 16, cex = 0.3)
+    } else {
+      lines(one_path$x, one_path$y, col = line_color, lwd = line_width)
+    }
+  }
+}
+```
+
+## 7. Generate the alignment figure
+
+```{r alignment-figure}
+margin <- 50
+
+zoom_x <- c(
+  max(0, floor(min(trace_points$x)) - margin),
+  min(ncol(raw_mip) - 1, ceiling(max(trace_points$x)) + margin)
+)
+
+zoom_y <- c(
+  min(nrow(raw_mip) - 1, ceiling(max(trace_points$y)) + margin),
+  max(0, floor(min(trace_points$y)) - margin)
+)
+
+par(mfrow = c(2, 2), mar = c(1, 1, 3, 1))
+
+plot_mip(raw_mip, "Raw 3D stack MIP + manual tracing")
+add_manual_tracing(trace_paths)
+
+plot_mip(probability_mip, "MGtoolbox 3D probability MIP + manual tracing")
+add_manual_tracing(trace_paths)
+
+plot_mip(
+  raw_mip,
+  "Raw MIP + manual tracing: zoom",
+  x_limits = zoom_x,
+  y_limits = zoom_y
+)
+add_manual_tracing(trace_paths, line_width = 1.5)
+
+plot_mip(
+  probability_mip,
+  "MG probability MIP + manual tracing: zoom",
+  x_limits = zoom_x,
+  y_limits = zoom_y
+)
+add_manual_tracing(trace_paths, line_width = 1.5)
+```
+
+## 8. Print the coordinate summary
+
+```{r print-summary}
+alignment_summary <- data.frame(
+  sample = sample_name,
+  raw_stack_dimensions = paste(dim(image_stack), collapse = " x "),
+  mg_probability_dimensions = paste(dim(probability_3d), collapse = " x "),
+  number_of_trace_paths = length(trace_paths),
+  number_of_trace_points = nrow(trace_points),
+  trace_x_range = paste(range(trace_points$x), collapse = " to "),
+  trace_y_range = paste(range(trace_points$y), collapse = " to "),
+  trace_z_range = paste(range(trace_points$z), collapse = " to ")
+)
+
+alignment_summary
+```
+
+# Decision before Step 3
+
+Do not proceed to the 3D target or hitting-probability calculation until the
+four-panel figure confirms that:
+
+1. the manual tracing overlays the intended cell in the raw MIP;
+2. it overlays the same structure in the MG-probability MIP;
+3. X and Y are not swapped or mirrored;
+4. the traced structure lies inside the expected sample field.
