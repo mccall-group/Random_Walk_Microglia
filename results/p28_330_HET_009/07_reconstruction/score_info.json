@@ -1,0 +1,7 @@
+{
+  "formula": "P_hit ** (1 / sqrt(L))",
+  "array_order": "Z,Y,X",
+  "valid_score_voxels": 1604329,
+  "minimum_score": 0.0,
+  "maximum_score": 1.0
+}

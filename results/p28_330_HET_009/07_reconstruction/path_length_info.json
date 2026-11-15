@@ -1,0 +1,11 @@
+{
+  "array_order": "Z,Y,X",
+  "neighbor_connectivity": 26,
+  "distance_units": "voxels",
+  "minimum_effective_length": 1.0,
+  "soma_start_voxels": 2829,
+  "reachable_active_voxels": 1606031,
+  "unreachable_active_voxels": 0,
+  "maximum_effective_length": 178.21688842773438,
+  "runtime_minutes": 0.061300579848466444
+}

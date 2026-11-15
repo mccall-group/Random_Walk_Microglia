@@ -1,0 +1,11 @@
+{
+  "component_filtering": true,
+  "minimum_component_voxels": 10,
+  "component_connectivity": 26,
+  "soma_target_components_retained": true,
+  "candidate_voxels": 235380,
+  "final_voxels": 233435,
+  "removed_voxels": 1945,
+  "components_before_filtering": 970,
+  "components_after_filtering": 252
+}

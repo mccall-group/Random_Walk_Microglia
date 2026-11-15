@@ -1,0 +1,15 @@
+{
+  "mode": "hook_friendly",
+  "converged": true,
+  "iterations": 18020,
+  "final_maximum_change": 9.986692689811782e-06,
+  "runtime_minutes": 13.446010177083856,
+  "active_voxels": 1606031,
+  "unknown_voxels": 1603202,
+  "target_voxels": 2829,
+  "zero_target_voxels": 0,
+  "outward_tolerance_xy": 1.0,
+  "inner_squared_tolerance": 3.0,
+  "convergence_tolerance": 1e-05,
+  "maximum_iterations": 40000
+}

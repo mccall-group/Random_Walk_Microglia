@@ -1,0 +1,13 @@
+{
+  "raw_mip_quantiles": [
+    0.01,
+    0.998
+  ],
+  "normalization_lower_value": 0.009140154346823692,
+  "normalization_upper_value": 0.062485694885253906,
+  "score_threshold": 0.5,
+  "intensity_threshold": 0.12,
+  "intensity_gate": "same XY gate at every Z slice",
+  "soma_targets_retained": true,
+  "candidate_voxels": 235380
+}

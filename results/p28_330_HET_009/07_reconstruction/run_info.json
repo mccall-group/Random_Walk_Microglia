@@ -1,0 +1,115 @@
+{
+  "sample": "p28_330_HET_009",
+  "array_order_3d": "Z,Y,X",
+  "array_order_2d": "Y,X",
+  "shape_zyx": [
+    161,
+    241,
+    241
+  ],
+  "soma_center_x_local": 120.754414125201,
+  "soma_center_y_local": 120.4341894061,
+  "input_files": {
+    "metadata": "results/p28_330_HET_009/05_soma_target/roi_metadata.csv",
+    "signal": "results/p28_330_HET_009/05_soma_target/mg_probability_roi_yxz_float32.bin",
+    "target": "results/p28_330_HET_009/05_soma_target/soma_target_roi_yxz_uint8.bin",
+    "raw_mip": "results/p28_330_HET_009/05_soma_target/raw_mip_roi_yx_float32.bin"
+  },
+  "manual_trace_file": "data/p28_330_HET_009/manual_tracing/p28_330_HET_009_manual.traces",
+  "manual_trace_available": true,
+  "transition_weights": {
+    "signal_power": 5.0,
+    "epsilon": 1e-12
+  },
+  "active_domain": {
+    "active_threshold": 0.12,
+    "target_dilation_iterations": 2,
+    "component_policy": "all_touching_components",
+    "thresholded_components": 4436,
+    "retained_components": 1,
+    "thresholded_voxels": 1612883,
+    "active_voxels": 1606031,
+    "target_voxels": 2829,
+    "unknown_voxels": 1603202
+  },
+  "solver": {
+    "mode": "hook_friendly",
+    "converged": true,
+    "iterations": 18020,
+    "final_maximum_change": 9.986692689811782e-06,
+    "runtime_minutes": 13.446010177083856,
+    "active_voxels": 1606031,
+    "unknown_voxels": 1603202,
+    "target_voxels": 2829,
+    "zero_target_voxels": 0,
+    "outward_tolerance_xy": 1.0,
+    "inner_squared_tolerance": 3.0,
+    "convergence_tolerance": 1e-05,
+    "maximum_iterations": 40000
+  },
+  "path_length": {
+    "array_order": "Z,Y,X",
+    "neighbor_connectivity": 26,
+    "distance_units": "voxels",
+    "minimum_effective_length": 1.0,
+    "soma_start_voxels": 2829,
+    "reachable_active_voxels": 1606031,
+    "unreachable_active_voxels": 0,
+    "maximum_effective_length": 178.21688842773438,
+    "runtime_minutes": 0.061300579848466444
+  },
+  "score": {
+    "formula": "P_hit ** (1 / sqrt(L))",
+    "array_order": "Z,Y,X",
+    "valid_score_voxels": 1604329,
+    "minimum_score": 0.0,
+    "maximum_score": 1.0
+  },
+  "intensity_filter": {
+    "raw_mip_quantiles": [
+      0.01,
+      0.998
+    ],
+    "normalization_lower_value": 0.009140154346823692,
+    "normalization_upper_value": 0.062485694885253906,
+    "score_threshold": 0.5,
+    "intensity_threshold": 0.12,
+    "intensity_gate": "same XY gate at every Z slice",
+    "soma_targets_retained": true,
+    "candidate_voxels": 235380
+  },
+  "mask": {
+    "component_filtering": true,
+    "minimum_component_voxels": 10,
+    "component_connectivity": 26,
+    "soma_target_components_retained": true,
+    "candidate_voxels": 235380,
+    "final_voxels": 233435,
+    "removed_voxels": 1945,
+    "components_before_filtering": 970,
+    "components_after_filtering": 252
+  },
+  "files": {
+    "signal": "signal_zyx.npy",
+    "active_domain": "active_domain_zyx.npy",
+    "soma_target": "soma_target_zyx.npy",
+    "raw_mip": "raw_mip_yx.npy",
+    "normalized_raw_mip": "normalized_raw_mip_yx.npy",
+    "hitting_probability": "P_hit_zyx.npy",
+    "path_length": "L_zyx.npy",
+    "adjusted_score": "sqrtL_score_zyx.npy",
+    "candidate_mask": "candidate_mask_zyx.npy",
+    "final_mask": "final_mask_zyx.npy",
+    "roi_metadata": "roi_metadata.csv"
+  },
+  "environment": {
+    "python": "3.13.5",
+    "packages": {
+      "numpy": "2.1.3",
+      "scipy": "1.15.3",
+      "numba": "0.61.0",
+      "scikit-image": "0.25.0",
+      "pandas": "2.2.3"
+    }
+  }
+}
