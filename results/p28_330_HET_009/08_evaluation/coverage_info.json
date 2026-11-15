@@ -1,0 +1,13 @@
+{
+  "sample": "p28_330_HET_009",
+  "primary_metric": "exact 3D coverage within ROI",
+  "reference_denominator": "all unique traced voxels inside ROI",
+  "traced_3d_voxels": 2491,
+  "covered_3d_voxels": 2092,
+  "missed_3d_voxels": 399,
+  "coverage_3d_percent": 83.98233641107988,
+  "traced_xy_pixels": 2399,
+  "covered_xy_pixels": 2099,
+  "coverage_xy_percent": 87.49478949562318,
+  "traced_voxels_outside_roi": 262
+}

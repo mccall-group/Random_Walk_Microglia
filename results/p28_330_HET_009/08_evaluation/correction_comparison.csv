@@ -1,0 +1,4 @@
+version,score_formula,traced_3d_voxels,covered_3d_voxels,missed_3d_voxels,coverage_3d_percent,traced_xy_pixels,covered_xy_pixels,coverage_xy_percent,selected_3d_voxels,selected_xy_pixels,score_threshold,raw_mip_intensity_threshold,component_filtering,minimum_component_voxels
+uncorrected,P_hit,2491,880,1611,35.327177840224806,2399,895,37.30721133805753,81621,4440,0.5,0.12,True,10
+inverse_L,P_hit ** (1 / L),2491,2256,235,90.56603773584905,2399,2166,90.28761984160067,441521,13287,0.5,0.12,True,10
+inverse_sqrtL,P_hit ** (1 / sqrt(L)),2491,2092,399,83.98233641107988,2399,2099,87.49478949562318,233435,9527,0.5,0.12,True,10

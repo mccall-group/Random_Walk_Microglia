@@ -1,0 +1,14 @@
+{
+  "source_file": "data/p28_330_HET_009/manual_tracing/p28_330_HET_009_manual.traces",
+  "coordinate_columns": "X,Y,Z",
+  "coordinate_origin": "zero-based local ROI",
+  "rasterization": "round endpoints, then line_nd with endpoint=True",
+  "path_count": 125,
+  "control_point_count": 2884,
+  "unique_voxels_full_trace": 2753,
+  "unique_voxels_inside_roi": 2491,
+  "unique_voxels_outside_roi": 262,
+  "roi_x0": 742,
+  "roi_y0": 433,
+  "roi_z0": 0
+}

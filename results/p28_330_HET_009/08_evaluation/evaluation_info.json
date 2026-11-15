@@ -1,0 +1,70 @@
+{
+  "sample": "p28_330_HET_009",
+  "reconstruction_directory": "results/p28_330_HET_009/07_reconstruction",
+  "evaluation_directory": "results/p28_330_HET_009/08_evaluation",
+  "manual_trace_source": "data/p28_330_HET_009/manual_tracing/p28_330_HET_009_manual.traces",
+  "array_order_3d": "Z,Y,X",
+  "trace_coordinate_columns": "X,Y,Z",
+  "shape_zyx": [
+    161,
+    241,
+    241
+  ],
+  "evaluation_scope": "unique traced voxels within the analysis ROI",
+  "primary_metric": "exact 3D coverage within ROI",
+  "secondary_metric": "exact XY-projected coverage within ROI",
+  "trace": {
+    "source_file": "data/p28_330_HET_009/manual_tracing/p28_330_HET_009_manual.traces",
+    "coordinate_columns": "X,Y,Z",
+    "coordinate_origin": "zero-based local ROI",
+    "rasterization": "round endpoints, then line_nd with endpoint=True",
+    "path_count": 125,
+    "control_point_count": 2884,
+    "unique_voxels_full_trace": 2753,
+    "unique_voxels_inside_roi": 2491,
+    "unique_voxels_outside_roi": 262,
+    "roi_x0": 742,
+    "roi_y0": 433,
+    "roi_z0": 0
+  },
+  "coverage": {
+    "sample": "p28_330_HET_009",
+    "primary_metric": "exact 3D coverage within ROI",
+    "reference_denominator": "all unique traced voxels inside ROI",
+    "traced_3d_voxels": 2491,
+    "covered_3d_voxels": 2092,
+    "missed_3d_voxels": 399,
+    "coverage_3d_percent": 83.98233641107988,
+    "traced_xy_pixels": 2399,
+    "covered_xy_pixels": 2099,
+    "coverage_xy_percent": 87.49478949562318,
+    "traced_voxels_outside_roi": 262
+  },
+  "comparison_versions": [
+    "uncorrected",
+    "inverse_L",
+    "inverse_sqrtL"
+  ],
+  "matched_filtering": {
+    "score_threshold": 0.5,
+    "raw_mip_intensity_threshold": 0.12,
+    "component_filtering": true,
+    "minimum_component_voxels": 10,
+    "soma_targets_retained": true
+  },
+  "files": {
+    "source_run_info": "source_reconstruction_run_info.json",
+    "roi_metadata": "roi_metadata.csv",
+    "manual_trace_voxels": "manual_trace_voxels_roi_xyz.npy",
+    "manual_trace_info": "manual_trace_info.json",
+    "coverage_table": "coverage_summary.csv",
+    "coverage_info": "coverage_info.json",
+    "correction_comparison": "correction_comparison.csv",
+    "inverse_L_score": "score_inverse_L_zyx.npy"
+  },
+  "correction_mask_files": {
+    "uncorrected": "mask_uncorrected_zyx.npy",
+    "inverse_L": "mask_inverse_L_zyx.npy",
+    "inverse_sqrtL": "mask_inverse_sqrtL_zyx.npy"
+  }
+}
