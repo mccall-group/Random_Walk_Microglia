@@ -1,0 +1,52 @@
+{
+  "sample": "p28_330_HET_009",
+  "selected_active_threshold": 0.12,
+  "candidate_active_thresholds": [
+    0.08,
+    0.09,
+    0.1,
+    0.11,
+    0.12,
+    0.13,
+    0.14,
+    0.15
+  ],
+  "selection_rule": "coverage * continuity * (1 - spill)",
+  "selection_scope": "highest score among tested thresholds",
+  "selected_metrics": {
+    "coverage": 0.9262805169937769,
+    "continuity": 0.9262805169937769,
+    "spill": 0.24143817899637868,
+    "combined_score": 0.6508427018379306
+  },
+  "reference_settings": {
+    "hitting_display_cutoff": 0.01,
+    "signal_threshold": 0.251336120624123,
+    "territory_active_threshold": 0.12,
+    "territory_dilation_iterations": 3,
+    "support_dilation_iterations": 4
+  },
+  "target_dilation_iterations": 2,
+  "numerical_epsilon": 1e-12,
+  "selected_hitting_map": "P_hit_t0.12.npy",
+  "selected_solver_record": {
+    "sample": "p28_330_HET_009",
+    "active_threshold": 0.12,
+    "signal_power": 5.0,
+    "active_component_policy": "largest_touching_component",
+    "warm_start": false,
+    "mode": "inner",
+    "converged": true,
+    "iterations": 610,
+    "final_maximum_change": 9.180750987214381e-08,
+    "runtime_minutes": 0.36047682221590854,
+    "active_voxels": 1606031,
+    "unknown_voxels": 1603202,
+    "target_voxels": 2829,
+    "zero_target_voxels": 0,
+    "outward_tolerance_xy": 1.0,
+    "inner_squared_tolerance": 3.0,
+    "convergence_tolerance": 1e-07,
+    "maximum_iterations": 3000
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "sample": "p28_330_HET_009",
+  "active_threshold": 0.1,
+  "signal_power": 5.0,
+  "active_component_policy": "largest_touching_component",
+  "warm_start": false,
+  "mode": "inner",
+  "converged": true,
+  "iterations": 860,
+  "final_maximum_change": 8.903429460360712e-08,
+  "runtime_minutes": 0.5666754736177002,
+  "active_voxels": 2447545,
+  "unknown_voxels": 2444716,
+  "target_voxels": 2829,
+  "zero_target_voxels": 0,
+  "outward_tolerance_xy": 1.0,
+  "inner_squared_tolerance": 3.0,
+  "convergence_tolerance": 1e-07,
+  "maximum_iterations": 3000
+}

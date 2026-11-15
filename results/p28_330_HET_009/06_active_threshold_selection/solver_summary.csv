@@ -1,0 +1,9 @@
+sample,active_threshold,signal_power,active_component_policy,warm_start,mode,converged,iterations,final_maximum_change,runtime_minutes,active_voxels,unknown_voxels,target_voxels,zero_target_voxels,outward_tolerance_xy,inner_squared_tolerance,convergence_tolerance,maximum_iterations
+p28_330_HET_009,0.08,5.0,largest_touching_component,False,inner,True,1050,9.960155511468116e-08,0.8336488541661917,3087135,3084306,2829,0,1.0,3.0,1e-07,3000
+p28_330_HET_009,0.09,5.0,largest_touching_component,False,inner,True,960,8.649864180476641e-08,0.6347101270822653,2802486,2799657,2829,0,1.0,3.0,1e-07,3000
+p28_330_HET_009,0.1,5.0,largest_touching_component,False,inner,True,860,8.903429460360712e-08,0.5666754736177002,2447545,2444716,2829,0,1.0,3.0,1e-07,3000
+p28_330_HET_009,0.11,5.0,largest_touching_component,False,inner,True,740,9.361706176935769e-08,0.44809924235062987,2036872,2034043,2829,0,1.0,3.0,1e-07,3000
+p28_330_HET_009,0.12,5.0,largest_touching_component,False,inner,True,610,9.180750987214381e-08,0.36047682221590854,1606031,1603202,2829,0,1.0,3.0,1e-07,3000
+p28_330_HET_009,0.13,5.0,largest_touching_component,False,inner,True,530,7.536489968207327e-08,0.2646592867987541,1198899,1196070,2829,0,1.0,3.0,1e-07,3000
+p28_330_HET_009,0.14,5.0,largest_touching_component,False,inner,True,440,7.472157324828199e-08,0.16809439236531035,848894,846065,2829,0,1.0,3.0,1e-07,3000
+p28_330_HET_009,0.15,5.0,largest_touching_component,False,inner,True,360,7.271326133567735e-08,0.11737739166710526,573780,570951,2829,0,1.0,3.0,1e-07,3000
