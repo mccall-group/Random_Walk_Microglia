@@ -1,0 +1,17 @@
+sample=p28_330_HET_009
+input=data/p28_330_HET_009/raw/p28_330_HET_009.tif
+input_dimensions_xyz=1024,1024,161
+bio_dimensions=210.42,210.42,48
+prior_soma_diameter=12
+minimum_soma_volume=300
+territory_mu=60
+territory_sigma=3
+detected_somas=17
+probability_dimensions_xyz=1024,1024,161
+probability_min=0
+probability_median=0.00045777065608107
+probability_mean=0.00303037108003782
+probability_max=0.0624856946669718
+probability_3d_file=results/p28_330_HET_009/01_mgtoolbox_signal/p28_330_HET_009_mg_probability_3d.rds
+stack_object_file=results/p28_330_HET_009/01_mgtoolbox_signal/p28_330_HET_009_stackObj_after_detected_territory.rds
+qc_file=results/p28_330_HET_009/figures/p28_330_HET_009_mg_probability_3d_mip_qc.png
