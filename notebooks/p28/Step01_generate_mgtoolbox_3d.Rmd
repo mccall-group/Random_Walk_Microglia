@@ -1,0 +1,336 @@
+---
+title: "01 - Generate MGtoolbox 3D probability: p28_330_HET_009"
+author: "Xinyi Chen"
+output: html_document
+---
+
+# Purpose
+
+This file reads the raw three-dimensional image for the P28 sample,
+detects somata using MGtoolbox, and applies spatial weights to image
+intensities based on distance from the detected somata.
+
+The resulting three-dimensional signal and soma information are saved
+for subsequent analyses. A maximum-intensity projection is also exported
+for visual inspection.
+
+# Steps
+
+1. Libraries
+   Load MGtoolbox, which provides functions for image loading,
+   soma detection, and spatial weighting.
+
+2. Locate the project and define parameters
+   Identify the project directory, specify the sample and file paths,
+   and set the physical image dimensions, soma-detection parameters,
+   and spatial-weighting parameters.
+
+3. Read the 3D TIFF stack
+   Read the raw TIFF stack into the three-dimensional array image_stack.
+
+4. Construct the MGtoolbox stack object
+   Store the image, physical dimensions, and output settings in a
+   stackObj object. Create the required output directories and
+   visualize the image.
+
+5. Detect somas
+   Detect somata and extract their centers and region information.
+   Reuse the saved MDR calculation when available.
+
+6. Generate the MGtoolbox 3D detected-signal stack
+   Generate spatial weights from the detected soma positions and
+   multiply them by the image intensities. Store the resulting
+   three-dimensional signal as probability_3d.
+
+7. Save the 3D results
+   Save the weighted signal and stackObj as RDS files.
+   Export soma centers and region information as CSV files.
+
+8. Save a QC maximum-intensity projection
+   Project the weighted signal along the axial direction and save
+   a PNG for visual inspection. Subsequent three-dimensional analyses
+   use the saved signal volume, rather than this projection.
+
+9. Save the run summary
+   Record the input file, image dimensions, parameter settings,
+   number of detected somata, signal statistics, and output paths
+   so that the processing can be traced.
+
+The setup chunk controls R Markdown output formatting and is separate
+from these processing steps.
+
+```{r setup}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  warning = FALSE,
+  message = TRUE
+)
+```
+
+## 1. Libraries
+
+```{r libraries}
+library(MGtoolbox)
+```
+
+## 2. Locate the project and define parameters
+
+```{r paths-and-parameters}
+find_project_root <- function(start = getwd()) {
+  current <- normalizePath(start, winslash = "/", mustWork = TRUE)
+
+  repeat {
+    has_readme <- file.exists(file.path(current, "README.md"))
+    has_notebooks <- dir.exists(file.path(current, "notebooks"))
+    has_data <- dir.exists(file.path(current, "data"))
+
+    if (has_readme && has_notebooks && has_data) {
+      return(current)
+    }
+
+    parent <- dirname(current)
+    if (identical(parent, current)) {
+      stop("Open this file from within the repository containing README.md, notebooks/, and data/.")
+    }
+    current <- parent
+  }
+}
+
+project_root <- find_project_root()
+
+# Display and record paths relative to the repository root.
+project_relative <- function(path) {
+  prefix <- paste0(project_root, "/")
+
+  if (!startsWith(path, prefix)) {
+    stop("The path is outside the repository.")
+  }
+
+  substring(path, nchar(prefix) + 1L)
+}
+
+sample_name <- "p28_330_HET_009"
+
+input_dir <- file.path(
+  project_root,
+  "data",
+  sample_name,
+  "raw"
+)
+
+input_file <- "p28_330_HET_009.tif"
+
+output_dir <- file.path(
+  project_root,
+  "results",
+  sample_name,
+  "01_mgtoolbox_signal"
+)
+
+qc_dir <- file.path(output_dir, "figures")
+
+dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(qc_dir, recursive = TRUE, showWarnings = FALSE)
+
+input_path <- file.path(input_dir, input_file)
+
+if (!file.exists(input_path)) {
+  stop("Input TIFF was not found: ", project_relative(input_path))
+}
+
+# These values reproduce the settings of the existing p28 MGtoolbox object.
+bio_dimensions <- c(210.42, 210.42, 48)
+prior_soma_diameter <- 12
+minimum_soma_volume <- 300
+territory_mu <- 60
+territory_sigma <- 3
+
+cat("Project root: repository root\n")
+cat("Input:", project_relative(input_path), "\n")
+cat("Output directory:", project_relative(output_dir), "\n")
+```
+
+## 3. Read the 3D TIFF stack
+
+```{r read-stack}
+stack_list <- read_z_stacks(
+  dir = input_dir,
+  filename = input_file
+)
+
+image_stack <- stack_list[[input_file]]
+
+dim(image_stack)
+```
+
+## 4. Construct the MGtoolbox stack object
+
+```{r construct-stack-object}
+so <- stackObj(
+  image_stack,
+  bio_dim = bio_dimensions,
+  output_path = output_dir,
+  stack_alias = sample_name
+)
+
+create_stackDir(so)
+
+cat("stackObj dimensions:\n")
+print(dim(stack(so)))
+
+cat("Biological dimensions:\n")
+print(bio_dim(so))
+
+# visualize 
+
+plot(so)
+```
+
+## 5. Detect somas
+
+The MDR calculation is expensive. On the first run, the code creates and
+saves it. On a later run, the existing MDR file is imported automatically.
+
+```{r detect-somas}
+mdr_file <- file.path(
+  output_dir,
+  sample_name,
+  "MDR",
+  paste0(sample_name, "_MDR.RDS")
+)
+
+use_existing_mdr <- file.exists(mdr_file)
+
+cat("Use existing MDR:", use_existing_mdr, "\n")
+
+so <- detect_somas(
+  stackObj = so,
+  prior_soma_diameter = prior_soma_diameter,
+  min_soma_volume = minimum_soma_volume,
+  import_MDR = use_existing_mdr,
+  export_MDR = TRUE
+)
+
+soma_centroid_table <- as.data.frame(soma_centroids(so))
+soma_cluster_table <- as.data.frame(soma_clusters(so))
+
+cat("Number of detected somas:", nrow(soma_centroid_table), "\n")
+print(soma_centroid_table)
+```
+
+## 6. Generate the MGtoolbox 3D detected-signal stack
+
+```{r detected-territory}
+signal_stack(so) <- stack(so)
+
+so <- detected_territory(
+  so,
+  mu = territory_mu,
+  sigma = territory_sigma
+)
+
+probability_3d <- so@detected_signal_stack
+
+cat("3D MG probability dimensions (X, Y, Z):\n")
+print(dim(probability_3d))
+
+cat("3D MG probability summary:\n")
+print(summary(as.vector(probability_3d)))
+
+if (!identical(dim(probability_3d), dim(image_stack))) {
+  stop("The 3D probability stack does not match the raw stack dimensions.")
+}
+```
+
+## 7. Save the 3D results
+
+```{r save-results}
+stack_object_file <- file.path(
+  output_dir,
+  paste0(sample_name, "_stackObj_after_detected_territory.rds")
+)
+
+probability_3d_file <- file.path(
+  output_dir,
+  paste0(sample_name, "_mg_probability_3d.rds")
+)
+
+soma_centroid_file <- file.path(
+  output_dir,
+  paste0(sample_name, "_soma_centroids.csv")
+)
+
+soma_cluster_file <- file.path(
+  output_dir,
+  paste0(sample_name, "_soma_clusters.csv")
+)
+
+saveRDS(so, stack_object_file)
+saveRDS(probability_3d, probability_3d_file)
+write.csv(soma_centroid_table, soma_centroid_file, row.names = FALSE)
+write.csv(soma_cluster_table, soma_cluster_file, row.names = FALSE)
+
+cat("Saved stackObj:\n", project_relative(stack_object_file), "\n")
+cat("Saved 3D MG probability:\n", project_relative(probability_3d_file), "\n")
+```
+
+## 8. Save a QC maximum-intensity projection
+
+This projection is only a visual quality-control image. The downstream 3D
+analysis will use `probability_3d`, not this projection.
+
+```{r save-qc}
+probability_mip <- MIProject_im(probability_3d, along = 3)
+
+qc_file <- file.path(
+  qc_dir,
+  paste0(sample_name, "_mg_probability_3d_mip_qc.png")
+)
+
+png(qc_file, width = 1600, height = 1600, res = 200)
+par(mar = c(0, 0, 3, 0))
+image(
+  t(probability_mip)[, nrow(probability_mip):1],
+  col = gray.colors(256),
+  axes = FALSE,
+  main = paste(sample_name, "MGtoolbox 3D probability MIP")
+)
+dev.off()
+
+cat("Saved QC image:\n", project_relative(qc_file), "\n")
+```
+
+## 9. Save the run summary
+
+```{r save-summary}
+summary_file <- file.path(
+  output_dir,
+  paste0(sample_name, "_mg_probability_3d_summary.txt")
+)
+
+summary_lines <- c(
+  paste0("sample=", sample_name),
+  paste0("input=", project_relative(input_path)),
+  paste0("input_dimensions_xyz=", paste(dim(image_stack), collapse = ",")),
+  paste0("bio_dimensions=", paste(bio_dimensions, collapse = ",")),
+  paste0("prior_soma_diameter=", prior_soma_diameter),
+  paste0("minimum_soma_volume=", minimum_soma_volume),
+  paste0("territory_mu=", territory_mu),
+  paste0("territory_sigma=", territory_sigma),
+  paste0("detected_somas=", nrow(soma_centroid_table)),
+  paste0("probability_dimensions_xyz=", paste(dim(probability_3d), collapse = ",")),
+  paste0("probability_min=", min(probability_3d, na.rm = TRUE)),
+  paste0("probability_median=", median(probability_3d, na.rm = TRUE)),
+  paste0("probability_mean=", mean(probability_3d, na.rm = TRUE)),
+  paste0("probability_max=", max(probability_3d, na.rm = TRUE)),
+  paste0("probability_3d_file=", project_relative(probability_3d_file)),
+  paste0("stack_object_file=", project_relative(stack_object_file)),
+  paste0("qc_file=", project_relative(qc_file))
+)
+
+writeLines(summary_lines, summary_file)
+
+cat(paste(summary_lines, collapse = "\n"))
+cat("\n\nMGtoolbox 3D generation completed successfully.\n")
+```
