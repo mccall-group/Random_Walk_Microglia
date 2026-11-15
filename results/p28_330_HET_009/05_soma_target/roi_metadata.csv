@@ -1,0 +1,2 @@
+"sample","cellpose_label","array_order","dim_y","dim_x","dim_z","global_y0_zero_based","global_y1_zero_based","global_x0_zero_based","global_x1_zero_based","soma_center_y_global","soma_center_x_global","soma_center_y_local","soma_center_x_local","soma_radius_xy","target_quantile","target_probability_cutoff","target_voxels"
+"p28_330_HET_009",25,"R column-major Y,X,Z",241,241,161,433,673,742,982,553.4341894061,862.754414125201,120.4341894061,120.754414125201,18,0.99,1,2829
