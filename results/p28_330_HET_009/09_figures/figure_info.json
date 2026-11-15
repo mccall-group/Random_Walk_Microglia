@@ -1,0 +1,47 @@
+{
+  "sample": "p28_330_HET_009",
+  "reconstruction_directory": "results/p28_330_HET_009/07_reconstruction",
+  "evaluation_directory": "results/p28_330_HET_009/08_evaluation",
+  "manual_trace_source": "data/p28_330_HET_009/manual_tracing/p28_330_HET_009_manual.traces",
+  "source_records": {
+    "reconstruction": "source_reconstruction_run_info.json",
+    "evaluation": "source_evaluation_info.json"
+  },
+  "tables": {
+    "coverage": "coverage_summary.csv",
+    "correction_comparison": "correction_comparison.csv"
+  },
+  "figures": {
+    "reconstruction_panels": {
+      "png": "p28_reconstruction_panels.png"
+    },
+    "correction_comparison": {
+      "png": "three_correction_maps.png"
+    }
+  },
+  "plotting": {
+    "font_family": [
+      "DejaVu Sans"
+    ],
+    "font_size_pt": 9.0,
+    "export_dpi": 300,
+    "export_formats": [
+      "png"
+    ],
+    "score_colormap": "plasma",
+    "score_color_limits": [
+      0.5,
+      1.0
+    ],
+    "background": "saved normalized raw-image MIP",
+    "score_projection": "maximum score over selected voxels along Z",
+    "manual_tracing": "original floating-point XY paths, clipped to the ROI",
+    "manual_trace_color": "cyan",
+    "soma_target_contour_color": "cyan"
+  },
+  "software": {
+    "numpy": "2.1.3",
+    "pandas": "2.2.3",
+    "matplotlib": "3.10.0"
+  }
+}

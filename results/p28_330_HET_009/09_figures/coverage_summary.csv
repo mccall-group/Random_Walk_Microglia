@@ -1,0 +1,3 @@
+evaluation,manual_locations,covered_locations,missed_locations,coverage_percent
+"3D exact, within ROI",2491,2092,399,83.98233641107988
+"XY projected exact, within ROI",2399,2099,300,87.49478949562318
