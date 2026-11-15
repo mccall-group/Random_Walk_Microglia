@@ -1,0 +1,523 @@
+---
+title: "05 - Build the 3D soma target"
+author: "Xinyi Chen"
+output: html_document
+---
+
+# Purpose
+
+This file prepares the inputs for the Python reconstruction.
+It defines a fixed three-dimensional soma target, crops a
+soma-centered region of interest (ROI), and exports the signal
+volume, soma target, raw-image projection, and coordinate metadata.
+
+The same exported inputs are used for active-threshold selection
+and final reconstruction. Manual tracing is loaded for visual
+quality control only; it does not define the soma target or ROI.
+
+# When to run
+
+Run this file before Step06 and Step07 to generate their inputs.
+Rerun it if the input images, selected soma, target settings,
+or ROI settings change. Otherwise, the existing exports can be reused.
+
+# Steps
+
+## Step 1 — Specify the input files and target settings
+
+Select the sample, raw image, MGtoolbox signal, Cellpose label
+image, and manual tracing. Specify the Cellpose label identifying
+the soma, an XY cylinder radius of 18 pixels, and a target-signal
+percentile of 99%.
+
+## Step 2 — Read and check the image data
+
+Load the raw three-dimensional image, MGtoolbox signal volume,
+and two-dimensional Cellpose labels. Normalize the signal by
+its maximum value, restore the integer Cellpose label IDs,
+and check that the XY image dimensions agree.
+
+## Step 3 — Read the manual tracing
+
+Read the tracing paths and their three-dimensional coordinates.
+Keep the paths separate so they can be displayed correctly
+during visual quality control.
+
+## Step 4 — Locate the selected soma
+
+Identify the pixels belonging to the selected Cellpose label
+and calculate their mean XY position. Convert this position
+to zero-based image coordinates for use in the exported metadata.
+
+## Step 5 — Define the soma-centered candidate cylinder
+
+Construct a disk with an 18-pixel radius around the soma center
+and extend it through all Z slices. This cylinder limits the
+region from which the three-dimensional soma target is selected.
+
+## Step 6 — Define the fixed three-dimensional soma target
+
+Calculate the 99th percentile of signal values within the
+cylinder. Retain cylinder voxels whose signal is at or above
+this value.
+
+This target remains fixed when different active thresholds
+are tested later.
+
+## Step 7 — Check target and tracing alignment
+
+Display full-image and zoomed maximum-intensity projections
+of the raw image and normalized signal. Overlay the manual
+tracing, selected Cellpose label, candidate disk, and projected
+three-dimensional target.
+
+Use these views to check their spatial alignment before export.
+
+## Step 8 — Crop and export the reconstruction inputs
+
+Define an XY ROI extending 120 pixels from the soma center,
+clipped to the image boundaries, and retain all Z slices.
+
+Export the cropped signal volume, soma target, and raw-image
+MIP as binary files. Save the array dimensions, storage order,
+ROI offsets, soma coordinates, and target settings in
+`roi_metadata.csv`.
+
+These files allow Python to read the arrays and map local
+ROI coordinates back to the original image.
+
+```{r setup}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+library(MGtoolbox)
+library(tiff)
+library(xml2)
+```
+
+## 1. Input
+
+```{r input}
+find_project_root <- function(start = getwd()) {
+  current <- normalizePath(start, winslash = "/", mustWork = TRUE)
+
+  repeat {
+    has_readme <- file.exists(file.path(current, "README.md"))
+    has_notebooks <- dir.exists(file.path(current, "notebooks"))
+    has_data <- dir.exists(file.path(current, "data"))
+
+    if (has_readme && has_notebooks && has_data) {
+      return(current)
+    }
+
+    parent <- dirname(current)
+    if (identical(parent, current)) {
+      stop("Open this file from within the repository containing README.md, notebooks/, and data/.")
+    }
+    current <- parent
+  }
+}
+
+project_root <- find_project_root()
+
+# Display exported paths relative to the repository root.
+project_relative <- function(path) {
+  prefix <- paste0(project_root, "/")
+
+  if (!startsWith(path, prefix)) {
+    stop("The path is outside the repository.")
+  }
+
+  substring(path, nchar(prefix) + 1L)
+}
+
+sample_name <- "p28_330_HET_009"
+cellpose_label <- 25L
+soma_radius_xy <- 18
+target_quantile <- 0.99
+
+raw_dir <- file.path(
+  project_root, "data", sample_name, "raw"
+)
+raw_file <- paste0(sample_name, ".tif")
+
+probability_file <- file.path(
+  project_root,
+  "results", sample_name, "01_mgtoolbox_signal",
+  paste0(sample_name, "_mg_probability_3d.rds")
+)
+
+cellpose_mask_file <- file.path(
+  project_root,
+  "data", sample_name, "cellpose",
+  "p28_330_HET_009_2D_projection_masks.tif"
+)
+
+trace_file <- file.path(
+  project_root,
+  "data", sample_name, "manual_tracing",
+  "p28_330_HET_009_manual.traces"
+)
+```
+
+## 2. Read the inputs
+
+```{r read-inputs}
+stack_list <- read_z_stacks(
+  dir = raw_dir,
+  filename = raw_file
+)
+raw_stack <- stack_list[[raw_file]]
+
+mg_probability_3d <- readRDS(probability_file)
+mg_probability_3d <- mg_probability_3d /
+  max(mg_probability_3d, na.rm = TRUE)
+
+cellpose_labels_scaled <- readTIFF(
+  cellpose_mask_file,
+  native = FALSE,
+  convert = FALSE
+)
+
+# tiff::readTIFF() represents this uint16 label image on a 0-1 scale.
+# Restore the original integer label IDs (0 through 44).
+cellpose_labels <- round(cellpose_labels_scaled * 65535)
+rm(cellpose_labels_scaled)
+
+cat("Cellpose label range:", range(cellpose_labels), "\n")
+cat("Pixels in requested label:", sum(cellpose_labels == cellpose_label), "\n")
+
+if (!identical(dim(cellpose_labels), dim(mg_probability_3d)[1:2])) {
+  stop(
+    "Cellpose mask dimensions do not match the MG probability XY dimensions."
+  )
+}
+
+cat("Raw dimensions:", paste(dim(raw_stack), collapse = " x "), "\n")
+cat("MG dimensions:", paste(dim(mg_probability_3d), collapse = " x "), "\n")
+cat("Cellpose dimensions:", paste(dim(cellpose_labels), collapse = " x "), "\n")
+```
+
+## 3. Read the manual tracing
+
+```{r read-tracing}
+trace_xml_text <- paste(
+  readLines(gzfile(trace_file), warn = FALSE),
+  collapse = "\n"
+)
+
+trace_document <- read_xml(trace_xml_text)
+trace_path_nodes <- xml_find_all(trace_document, "//path")
+
+trace_paths <- lapply(seq_along(trace_path_nodes), function(path_id) {
+  point_nodes <- xml_find_all(trace_path_nodes[[path_id]], ".//point")
+
+  data.frame(
+    path_id = path_id,
+    x = as.numeric(xml_attr(point_nodes, "x")),
+    y = as.numeric(xml_attr(point_nodes, "y")),
+    z = as.numeric(xml_attr(point_nodes, "z"))
+  )
+})
+
+trace_points <- do.call(rbind, trace_paths)
+
+cat("Tracing paths:", length(trace_paths), "\n")
+cat("Tracing points:", nrow(trace_points), "\n")
+```
+
+## 4. Find the Cellpose soma center
+
+```{r cellpose-center}
+cellpose_soma <- cellpose_labels == cellpose_label
+
+if (!any(cellpose_soma)) {
+  stop("Cellpose label ", cellpose_label, " was not found.")
+}
+
+soma_pixels <- which(cellpose_soma, arr.ind = TRUE)
+
+# Matrix rows are Y coordinates and columns are X coordinates.
+soma_center_y <- mean(soma_pixels[, "row"]) - 1
+soma_center_x <- mean(soma_pixels[, "col"]) - 1
+
+cat("Cellpose label:", cellpose_label, "\n")
+cat("Soma center X:", soma_center_x, "\n")
+cat("Soma center Y:", soma_center_y, "\n")
+```
+
+## 5. Build the XY disk and 3D candidate cylinder
+
+```{r candidate-cylinder}
+y_coordinates <- 0:(nrow(cellpose_labels) - 1)
+x_coordinates <- 0:(ncol(cellpose_labels) - 1)
+
+soma_disk_xy <- outer(
+  y_coordinates,
+  x_coordinates,
+  function(y, x) {
+    (x - soma_center_x)^2 + (y - soma_center_y)^2 <= soma_radius_xy^2
+  }
+)
+
+soma_candidate_3d <- array(
+  rep(soma_disk_xy, dim(mg_probability_3d)[3]),
+  dim = dim(mg_probability_3d)
+)
+
+cat("XY disk pixels:", sum(soma_disk_xy), "\n")
+cat("3D candidate-cylinder voxels:", sum(soma_candidate_3d), "\n")
+```
+
+## 6. Keep the brightest 1% as the fixed 3D target
+
+```{r build-target}
+candidate_values <- mg_probability_3d[soma_candidate_3d]
+
+target_probability_cutoff <- quantile(
+  candidate_values,
+  probs = target_quantile,
+  na.rm = TRUE,
+  names = FALSE
+)
+
+soma_target_3d <-
+  soma_candidate_3d &
+  mg_probability_3d >= target_probability_cutoff
+
+cat("Target quantile:", target_quantile, "\n")
+cat("Target probability cutoff:", target_probability_cutoff, "\n")
+cat("3D target voxels:", sum(soma_target_3d), "\n")
+cat("Target Z range (zero-based):")
+
+target_indices <- which(soma_target_3d, arr.ind = TRUE)
+print(range(target_indices[, 3] - 1))
+```
+
+## 7. Display the target QC with the manual tracing
+
+```{r target-qc}
+raw_mip <- apply(raw_stack, c(1, 2), max, na.rm = TRUE)
+mg_mip <- apply(mg_probability_3d, c(1, 2), max, na.rm = TRUE)
+target_mip <- apply(soma_target_3d, c(1, 2), any)
+
+normalize_for_display <- function(image_matrix) {
+  display_limits <- quantile(
+    image_matrix,
+    probs = c(0.01, 0.998),
+    na.rm = TRUE
+  )
+
+  displayed <- (image_matrix - display_limits[1]) /
+    (display_limits[2] - display_limits[1])
+
+  pmin(pmax(displayed, 0), 1)
+}
+
+plot_image <- function(
+  image_matrix,
+  title_text,
+  x_limits = c(0, ncol(image_matrix) - 1),
+  y_limits = c(nrow(image_matrix) - 1, 0)
+) {
+  plot(
+    NA,
+    xlim = x_limits,
+    ylim = y_limits,
+    asp = 1,
+    axes = FALSE,
+    xlab = "",
+    ylab = "",
+    main = title_text
+  )
+
+  rasterImage(
+    as.raster(normalize_for_display(image_matrix)),
+    xleft = 0,
+    ybottom = nrow(image_matrix) - 1,
+    xright = ncol(image_matrix) - 1,
+    ytop = 0,
+    interpolate = FALSE
+  )
+}
+
+add_trace <- function(paths, color = "magenta", line_width = 1.2) {
+  for (one_path in paths) {
+    if (nrow(one_path) == 1) {
+      points(one_path$x, one_path$y, col = color, pch = 16, cex = 0.3)
+    } else {
+      lines(one_path$x, one_path$y, col = color, lwd = line_width)
+    }
+  }
+}
+
+add_target_overlays <- function() {
+  contour(
+    x = 0:(ncol(cellpose_soma) - 1),
+    y = 0:(nrow(cellpose_soma) - 1),
+    z = t(cellpose_soma),
+    levels = 0.5,
+    add = TRUE,
+    drawlabels = FALSE,
+    col = "cyan",
+    lwd = 1.5
+  )
+  contour(
+    x = 0:(ncol(soma_disk_xy) - 1),
+    y = 0:(nrow(soma_disk_xy) - 1),
+    z = t(soma_disk_xy),
+    levels = 0.5,
+    add = TRUE,
+    drawlabels = FALSE,
+    col = "yellow",
+    lwd = 1.2
+  )
+  contour(
+    x = 0:(ncol(target_mip) - 1),
+    y = 0:(nrow(target_mip) - 1),
+    z = t(target_mip),
+    levels = 0.5,
+    add = TRUE,
+    drawlabels = FALSE,
+    col = "red",
+    lwd = 1.5
+  )
+  add_trace(trace_paths)
+}
+
+zoom_radius <- 90
+zoom_x <- c(
+  max(0, soma_center_x - zoom_radius),
+  min(ncol(raw_mip) - 1, soma_center_x + zoom_radius)
+)
+zoom_y <- c(
+  min(nrow(raw_mip) - 1, soma_center_y + zoom_radius),
+  max(0, soma_center_y - zoom_radius)
+)
+
+par(mfrow = c(2, 2), mar = c(1, 1, 3, 1))
+
+plot_image(raw_mip, "Raw MIP: full field")
+add_target_overlays()
+
+plot_image(raw_mip, "Raw MIP: target and tracing zoom", zoom_x, zoom_y)
+add_target_overlays()
+
+plot_image(mg_mip, "MG probability MIP: full field")
+add_target_overlays()
+
+plot_image(mg_mip, "MG probability MIP: target and tracing zoom", zoom_x, zoom_y)
+add_target_overlays()
+```
+
+QC colors: magenta is the manual tracing, cyan is Cellpose label 25, yellow is
+the radius-18 XY disk, and red is the Z-projected fixed 3D target.
+
+## 8. Export the approved target ROI for the next calculation
+
+Run this cell only after the target QC above is correct. These are working
+inputs for the active-threshold sweep and are saved in
+`results/p28_330_HET_009/3d/intermediate/`.
+
+```{r export-approved-target-roi}
+roi_radius_xy <- 120L
+
+roi_y0 <- max(0L, floor(soma_center_y) - roi_radius_xy)
+roi_y1 <- min(nrow(mg_probability_3d) - 1L, floor(soma_center_y) + roi_radius_xy)
+roi_x0 <- max(0L, floor(soma_center_x) - roi_radius_xy)
+roi_x1 <- min(ncol(mg_probability_3d) - 1L, floor(soma_center_x) + roi_radius_xy)
+
+roi_y_indices <- (roi_y0:roi_y1) + 1L
+roi_x_indices <- (roi_x0:roi_x1) + 1L
+
+mg_probability_roi <- mg_probability_3d[
+  roi_y_indices,
+  roi_x_indices,
+  ,
+  drop = FALSE
+]
+
+soma_target_roi <- soma_target_3d[
+  roi_y_indices,
+  roi_x_indices,
+  ,
+  drop = FALSE
+]
+
+raw_mip_roi <- raw_mip[
+  roi_y_indices,
+  roi_x_indices,
+  drop = FALSE
+]
+
+working_directory <- file.path(
+  project_root,
+  "results", sample_name, "3d", "intermediate"
+)
+dir.create(working_directory, recursive = TRUE, showWarnings = FALSE)
+
+write_float32 <- function(values, output_file) {
+  connection <- file(output_file, open = "wb")
+  on.exit(close(connection), add = TRUE)
+  writeBin(
+    as.numeric(values),
+    connection,
+    size = 4L,
+    endian = "little"
+  )
+}
+
+write_uint8 <- function(values, output_file) {
+  connection <- file(output_file, open = "wb")
+  on.exit(close(connection), add = TRUE)
+  writeBin(
+    as.integer(values),
+    connection,
+    size = 1L,
+    endian = "little"
+  )
+}
+
+write_float32(
+  mg_probability_roi,
+  file.path(working_directory, "mg_probability_roi_yxz_float32.bin")
+)
+
+write_uint8(
+  soma_target_roi,
+  file.path(working_directory, "soma_target_roi_yxz_uint8.bin")
+)
+
+write_float32(
+  raw_mip_roi,
+  file.path(working_directory, "raw_mip_roi_yx_float32.bin")
+)
+
+roi_metadata <- data.frame(
+  sample = sample_name,
+  cellpose_label = cellpose_label,
+  array_order = "R column-major Y,X,Z",
+  dim_y = dim(mg_probability_roi)[1],
+  dim_x = dim(mg_probability_roi)[2],
+  dim_z = dim(mg_probability_roi)[3],
+  global_y0_zero_based = roi_y0,
+  global_y1_zero_based = roi_y1,
+  global_x0_zero_based = roi_x0,
+  global_x1_zero_based = roi_x1,
+  soma_center_y_global = soma_center_y,
+  soma_center_x_global = soma_center_x,
+  soma_center_y_local = soma_center_y - roi_y0,
+  soma_center_x_local = soma_center_x - roi_x0,
+  soma_radius_xy = soma_radius_xy,
+  target_quantile = target_quantile,
+  target_probability_cutoff = target_probability_cutoff,
+  target_voxels = sum(soma_target_roi)
+)
+
+write.csv(
+  roi_metadata,
+  file.path(working_directory, "roi_metadata.csv"),
+  row.names = FALSE
+)
+
+cat("Exported working ROI to:\n", project_relative(working_directory), "\n", sep = "")
+print(roi_metadata)
+```

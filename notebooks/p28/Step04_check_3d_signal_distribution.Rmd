@@ -1,0 +1,237 @@
+---
+title: "04 - Check the 3D MGtoolbox signal distribution"
+author: "Xinyi Chen"
+output: html_document
+---
+
+This step reproduces the three-component distribution check before testing
+active thresholds. It does not select the active threshold.
+
+```{r setup}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+library(mixtools)
+library(ggplot2)
+
+# Wrapper around the mixture-model functions used in this workflow.
+EM_fun <- function(x, pi, mu, sigsq, eps, verb = NULL, ncomp = 2) {
+  if (ncomp == 2) {
+    em_fit <- mixtools::normalmixEM2comp(
+      x = c(x),
+      lambda = pi,
+      mu = mu,
+      sigsqrd = sigsq,
+      eps = eps,
+      verb = verb
+    )
+  } else if (ncomp == 3) {
+    em_fit <- mixtools::normalmixEM(
+      x = c(x),
+      lambda = pi,
+      mu = mu,
+      sigma = sqrt(sigsq),
+      epsilon = eps,
+      k = ncomp,
+      verb = verb
+    )
+  } else {
+    stop("ncomp must be either 2 or 3")
+  }
+
+  out_data <- list(
+    posterior = em_fit$posterior,
+    pi = em_fit$lambda,
+    mu = em_fit$mu,
+    sigsq = em_fit$sigma^2
+  )
+
+  return(out_data)
+}
+```
+
+## 1. Input
+
+```{r input}
+find_project_root <- function(start = getwd()) {
+  current <- normalizePath(start, winslash = "/", mustWork = TRUE)
+
+  repeat {
+    has_readme <- file.exists(file.path(current, "README.md"))
+    has_notebooks <- dir.exists(file.path(current, "notebooks"))
+    has_data <- dir.exists(file.path(current, "data"))
+
+    if (has_readme && has_notebooks && has_data) {
+      return(current)
+    }
+
+    parent <- dirname(current)
+    if (identical(parent, current)) {
+      stop("Open this file from within the repository containing README.md, notebooks/, and data/.")
+    }
+    current <- parent
+  }
+}
+
+project_root <- find_project_root()
+sample_name <- "p28_330_HET_009"
+
+probability_file <- file.path(
+  project_root,
+  "results", sample_name, "01_mgtoolbox_signal",
+  paste0(sample_name, "_mg_probability_3d.rds")
+)
+
+mg_probability_3d <- readRDS(probability_file)
+
+cat("Dimensions (X, Y, Z):", paste(dim(mg_probability_3d), collapse = " x "), "\n")
+```
+
+## 2. Normalize and sample the 3D voxel values
+
+```{r normalize-and-sample}
+normalization_divisor <- max(mg_probability_3d, na.rm = TRUE)
+normalized_values <- as.vector(mg_probability_3d) / normalization_divisor
+normalized_values <- normalized_values[is.finite(normalized_values)]
+
+set.seed(330009)
+number_to_sample <- min(600000L, length(normalized_values))
+density_sample <- sample(normalized_values, number_to_sample)
+
+# Perturb exact zeros to prevent a zero-variance component.
+zero_index <- density_sample == 0
+density_sample[zero_index] <- runif(sum(zero_index), 0, 1e-10)
+
+rm(mg_probability_3d, normalized_values)
+gc()
+
+cat("Normalization divisor:", normalization_divisor, "\n")
+cat("Sampled voxels:", length(density_sample), "\n")
+```
+
+## 3. Fit the three-component model
+
+```{r fit-three-components}
+fit <- EM_fun(
+  x = density_sample,
+  pi = c(0.60, 0.32, 0.08),
+  mu = c(0.008, 0.040, 0.192),
+  sigsq = c(0.0128^2, 0.0192^2, 0.128^2),
+  eps = 1e-6,
+  verb = FALSE,
+  ncomp = 3
+)
+
+component_order <- order(fit$mu)
+
+component_table <- data.frame(
+  component = c("Noise 1", "Noise 2", "Signal"),
+  mixture_weight = fit$pi[component_order],
+  mean = fit$mu[component_order],
+  standard_deviation = sqrt(fit$sigsq[component_order])
+)
+
+component_table
+```
+
+## 4. Calculate the intersections between adjacent components
+
+```{r intersections}
+weighted_density <- function(value, component_index) {
+  component_table$mixture_weight[component_index] * dnorm(
+    value,
+    mean = component_table$mean[component_index],
+    sd = component_table$standard_deviation[component_index]
+  )
+}
+
+find_last_intersection <- function(first_component, second_component) {
+  difference <- function(value) {
+    weighted_density(value, first_component) -
+      weighted_density(value, second_component)
+  }
+
+  search_grid <- seq(
+    component_table$mean[first_component],
+    component_table$mean[second_component],
+    length.out = 10001
+  )
+
+  difference_values <- vapply(search_grid, difference, numeric(1))
+  crossing_index <- which(
+    difference_values[-length(difference_values)] *
+      difference_values[-1] <= 0
+  )
+
+  if (length(crossing_index) == 0) {
+    return(NA_real_)
+  }
+
+  crossing_index <- crossing_index[length(crossing_index)]
+
+  uniroot(
+    difference,
+    c(search_grid[crossing_index], search_grid[crossing_index + 1L])
+  )$root
+}
+
+intersection_table <- data.frame(
+  intersection = c("Noise 1 / Noise 2", "Noise 2 / Signal"),
+  normalized_probability = c(
+    find_last_intersection(1, 2),
+    find_last_intersection(2, 3)
+  )
+)
+
+intersection_table
+```
+
+## 5. Display the three fitted curves
+
+```{r plot-three-curves}
+probability_grid <- seq(0, 1, length.out = 2000)
+
+curve_data <- do.call(rbind, lapply(1:3, function(component_index) {
+  data.frame(
+    normalized_probability = probability_grid,
+    density = weighted_density(probability_grid, component_index),
+    component = component_table$component[component_index]
+  )
+}))
+
+distribution_plot <- ggplot(
+  curve_data,
+  aes(
+    x = normalized_probability,
+    y = density,
+    color = component
+  )
+) +
+  geom_line(linewidth = 1) +
+  geom_vline(
+    data = intersection_table,
+    aes(xintercept = normalized_probability),
+    color = "black",
+    linetype = "dashed",
+    linewidth = 0.6,
+    inherit.aes = FALSE
+  ) +
+  scale_color_manual(values = c(
+    "Noise 1" = "#0072B2",
+    "Noise 2" = "#56B4E9",
+    "Signal" = "#009E73"
+  )) +
+  coord_cartesian(xlim = c(0, 1)) +
+  labs(
+    title = paste("3D MGtoolbox probability distribution:", sample_name),
+    x = "Normalized MGtoolbox probability",
+    y = "Weighted density",
+    color = NULL
+  ) +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "bottom")
+
+print(distribution_plot)
+```
+
+Use the three fitted components and their intersections only to define a
+reasonable interval of active-threshold candidates. The final active threshold
+will be chosen later with the quantitative hitting-map metric.
