@@ -1,0 +1,317 @@
+---
+title: "03 - Extract MGtoolbox probability on the 3D manual tracing"
+author: "Xinyi Chen"
+output: html_document
+---
+
+# Purpose
+
+This file examines the MGtoolbox preprocessed signal along the
+three-dimensional manual tracing for p28_330_HET_009. It converts
+tracing paths into voxel locations, checks that they fall within
+the signal volume, and extracts signal values at those locations.
+
+Two measurements are reported: the signal at each exact traced
+voxel and the maximum signal in its surrounding 3 × 3 × 3 neighborhood.
+Summary statistics and histograms help assess signal quality and
+sensitivity to small coordinate or tracing-width differences.
+
+# Steps
+
+1. Library
+   Load xml2 to read the manual-tracing file.
+
+2. File paths
+   Specify the project directory, sample name, MGtoolbox signal
+   file, and manual-tracing file.
+
+3. Read the MGtoolbox 3D probability volume
+   Load the three-dimensional preprocessed signal generated
+   in Step01 and print its dimensions.
+
+4. Read the manual tracing
+   Read the compressed XML file and extract each tracing path's
+   X, Y, and Z coordinates. Report the number of control points
+   and their coordinate ranges.
+
+5. Rasterize every 3D tracing segment
+   Interpolate between consecutive points within each path,
+   round the interpolated positions to voxel coordinates,
+   and remove duplicates. Check that all resulting voxels
+   lie inside the signal volume.
+
+6. Extract exact-voxel MG probabilities
+   Convert zero-based image coordinates to one-based R array
+   indices and extract the signal at each exact traced voxel.
+
+7. Extract radius-1 maximum probabilities
+   Find the maximum signal within a 3 × 3 × 3 neighborhood
+   centered on each traced voxel, including the voxel itself.
+   Keep this measurement separate from the exact-voxel value
+   to assess sensitivity to small spatial offsets.
+
+8. Print the Step 3 check
+   Report the number of traced voxels, the number outside
+   the volume, and the mean, median, and maximum of both
+   signal measurements.
+
+9. Display the two distributions
+   Display separate histograms of the exact-voxel signal
+   values and the neighborhood-maximum values.
+
+These tracing-based distributions are diagnostic measurements.
+They should not be used to select the active-domain threshold,
+because the same tracing is later used for validation.
+
+The setup chunk controls R Markdown output formatting and is
+separate from these processing steps.
+```{r setup}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+## 1. Library
+
+```{r library}
+library(xml2)
+```
+
+## 2. File paths
+
+```{r paths}
+find_project_root <- function(start = getwd()) {
+  current <- normalizePath(start, winslash = "/", mustWork = TRUE)
+
+  repeat {
+    has_readme <- file.exists(file.path(current, "README.md"))
+    has_notebooks <- dir.exists(file.path(current, "notebooks"))
+    has_data <- dir.exists(file.path(current, "data"))
+
+    if (has_readme && has_notebooks && has_data) {
+      return(current)
+    }
+
+    parent <- dirname(current)
+    if (identical(parent, current)) {
+      stop("Open this file from within the repository containing README.md, notebooks/, and data/.")
+    }
+    current <- parent
+  }
+}
+
+project_root <- find_project_root()
+sample_name <- "p28_330_HET_009"
+
+probability_file <- file.path(
+  project_root,
+  "results", sample_name, "01_mgtoolbox_signal",
+  "p28_330_HET_009_mg_probability_3d.rds"
+)
+
+trace_file <- file.path(
+  project_root,
+  "data", sample_name, "manual_tracing",
+  "p28_330_HET_009_manual.traces"
+)
+```
+
+## 3. Read the MGtoolbox 3D probability volume
+
+```{r read-probability}
+mg_probability_3d <- readRDS(probability_file)
+
+cat("MG probability dimensions (X, Y, Z):\n")
+print(dim(mg_probability_3d))
+```
+
+## 4. Read the manual tracing
+
+```{r read-tracing}
+trace_xml_text <- paste(
+  readLines(gzfile(trace_file), warn = FALSE),
+  collapse = "\n"
+)
+
+trace_document <- read_xml(trace_xml_text)
+trace_path_nodes <- xml_find_all(trace_document, "//path")
+
+trace_paths <- lapply(seq_along(trace_path_nodes), function(path_id) {
+  point_nodes <- xml_find_all(trace_path_nodes[[path_id]], ".//point")
+
+  data.frame(
+    path_id = path_id,
+    point_id = seq_along(point_nodes),
+    x = as.numeric(xml_attr(point_nodes, "x")),
+    y = as.numeric(xml_attr(point_nodes, "y")),
+    z = as.numeric(xml_attr(point_nodes, "z"))
+  )
+})
+
+trace_points <- do.call(rbind, trace_paths)
+
+cat("Tracing control points:", nrow(trace_points), "\n")
+print(rbind(
+  minimum = sapply(trace_points[c("x", "y", "z")], min),
+  maximum = sapply(trace_points[c("x", "y", "z")], max)
+))
+```
+
+## 5. Rasterize every 3D tracing segment
+
+The tracing coordinates are image coordinates beginning at zero, whereas R
+array indices begin at one. We first rasterize the line segments in image
+coordinates and add one only when indexing the R array.
+
+```{r rasterize-tracing}
+rasterize_one_path <- function(one_path) {
+  if (nrow(one_path) == 1) {
+    return(data.frame(
+      x = round(one_path$x),
+      y = round(one_path$y),
+      z = round(one_path$z)
+    ))
+  }
+
+  segment_voxels <- lapply(seq_len(nrow(one_path) - 1), function(i) {
+    start_point <- as.numeric(one_path[i, c("x", "y", "z")])
+    end_point <- as.numeric(one_path[i + 1, c("x", "y", "z")])
+
+    number_of_steps <- max(abs(end_point - start_point))
+    number_of_steps <- max(1L, ceiling(number_of_steps))
+    interpolation <- seq(0, 1, length.out = number_of_steps + 1L)
+
+    xyz <- outer(1 - interpolation, start_point) +
+      outer(interpolation, end_point)
+
+    data.frame(
+      x = round(xyz[, 1]),
+      y = round(xyz[, 2]),
+      z = round(xyz[, 3])
+    )
+  })
+
+  unique(do.call(rbind, segment_voxels))
+}
+
+trace_voxels <- unique(do.call(
+  rbind,
+  lapply(trace_paths, rasterize_one_path)
+))
+
+volume_dimensions <- dim(mg_probability_3d)
+
+inside_volume <-
+  trace_voxels$x >= 0 & trace_voxels$x < volume_dimensions[1] &
+  trace_voxels$y >= 0 & trace_voxels$y < volume_dimensions[2] &
+  trace_voxels$z >= 0 & trace_voxels$z < volume_dimensions[3]
+
+cat("Rasterized unique tracing voxels:", nrow(trace_voxels), "\n")
+cat("Voxels inside the MG volume:", sum(inside_volume), "\n")
+cat("Voxels outside the MG volume:", sum(!inside_volume), "\n")
+
+if (any(!inside_volume)) {
+  stop("Some tracing voxels lie outside the MG probability volume.")
+}
+```
+
+## 6. Extract exact-voxel MG probabilities
+
+```{r exact-probability}
+trace_indices <- cbind(
+  trace_voxels$x + 1L,
+  trace_voxels$y + 1L,
+  trace_voxels$z + 1L
+)
+
+trace_voxels$mg_probability_exact <- mg_probability_3d[trace_indices]
+
+summary(trace_voxels$mg_probability_exact)
+```
+
+## 7. Extract radius-1 maximum probabilities
+
+This second value tolerates a one-voxel registration or line-width difference.
+It is reported alongside the exact value; it does not replace it.
+
+```{r radius-one-probability}
+neighbor_offsets <- expand.grid(
+  dx = -1:1,
+  dy = -1:1,
+  dz = -1:1
+)
+
+radius_one_max <- function(x, y, z) {
+  neighbor_x <- x + neighbor_offsets$dx
+  neighbor_y <- y + neighbor_offsets$dy
+  neighbor_z <- z + neighbor_offsets$dz
+
+  valid <-
+    neighbor_x >= 0 & neighbor_x < volume_dimensions[1] &
+    neighbor_y >= 0 & neighbor_y < volume_dimensions[2] &
+    neighbor_z >= 0 & neighbor_z < volume_dimensions[3]
+
+  neighbor_indices <- cbind(
+    neighbor_x[valid] + 1L,
+    neighbor_y[valid] + 1L,
+    neighbor_z[valid] + 1L
+  )
+
+  max(mg_probability_3d[neighbor_indices], na.rm = TRUE)
+}
+
+trace_voxels$mg_probability_radius1 <- mapply(
+  radius_one_max,
+  trace_voxels$x,
+  trace_voxels$y,
+  trace_voxels$z
+)
+
+summary(trace_voxels$mg_probability_radius1)
+```
+
+## 8. Print the Step 3 check
+
+```{r check-summary}
+step3_summary <- data.frame(
+  sample = sample_name,
+  rasterized_trace_voxels = nrow(trace_voxels),
+  outside_volume = sum(!inside_volume),
+  exact_mean = mean(trace_voxels$mg_probability_exact),
+  exact_median = median(trace_voxels$mg_probability_exact),
+  exact_maximum = max(trace_voxels$mg_probability_exact),
+  radius1_mean = mean(trace_voxels$mg_probability_radius1),
+  radius1_median = median(trace_voxels$mg_probability_radius1),
+  radius1_maximum = max(trace_voxels$mg_probability_radius1)
+)
+
+step3_summary
+```
+
+## 9.Optional: Display the two distributions
+
+```{r probability-histograms}
+par(mfrow = c(1, 2), mar = c(4, 4, 3, 1))
+
+hist(
+  trace_voxels$mg_probability_exact,
+  breaks = 50,
+  col = "grey35",
+  border = NA,
+  main = "MG probability at exact trace voxels",
+  xlab = "MGtoolbox probability"
+)
+
+hist(
+  trace_voxels$mg_probability_radius1,
+  breaks = 50,
+  col = "grey35",
+  border = NA,
+  main = "MG probability within radius 1",
+  xlab = "MGtoolbox probability"
+)
+```
+
+# Decision before Step 4
+
+This step verifies coordinate indexing and measures MG signal on the manual
+tracing. Do not choose the active threshold from these tracing distributions,
+because the same tracing will later be used for validation.
