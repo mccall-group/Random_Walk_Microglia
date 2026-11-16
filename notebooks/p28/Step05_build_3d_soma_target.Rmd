@@ -415,7 +415,7 @@ the radius-18 XY disk, and red is the Z-projected fixed 3D target.
 
 Run this cell only after the target QC above is correct. These are working
 inputs for the active-threshold sweep and are saved in
-`results/p28_330_HET_009/3d/intermediate/`.
+`results/p28_330_HET_009/05_soma_target/`.
 
 ```{r export-approved-target-roi}
 roi_radius_xy <- 120L
@@ -450,7 +450,7 @@ raw_mip_roi <- raw_mip[
 
 working_directory <- file.path(
   project_root,
-  "results", sample_name, "3d", "intermediate"
+  "results", sample_name, "05_soma_target"
 )
 dir.create(working_directory, recursive = TRUE, showWarnings = FALSE)
 
